@@ -1,0 +1,30 @@
+# FILE PATH: backend/MAIN/editor/migrations/0001_initial.py
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = []
+
+    operations = [
+        migrations.CreateModel(
+            name='VideoComment',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True,
+                                           serialize=False, verbose_name='ID')),
+                ('project_id',     models.IntegerField(db_index=True)),
+                ('author_user_id', models.IntegerField()),
+                ('author_name',    models.CharField(max_length=150)),
+                ('author_role',    models.CharField(default='viewer', max_length=10)),
+                ('timestamp_sec',  models.FloatField()),
+                ('text',           models.TextField()),
+                ('created_at',     models.DateTimeField(auto_now_add=True)),
+            ],
+            options={
+                'ordering': ['timestamp_sec', 'created_at'],
+            },
+        ),
+    ]
