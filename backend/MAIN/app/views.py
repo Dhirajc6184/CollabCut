@@ -67,6 +67,8 @@ def login(request):
 
 
 
+from django.db.models import Q
+
 @csrf_exempt
 @api_view(['GET', 'POST'])
 def projects(request):
@@ -75,89 +77,23 @@ def projects(request):
     if request.method == 'GET':
         user_id = request.GET.get("user_id")
 
-        projects = Project.objects.filter(user_id=user_id)
+        projects = Project.objects.filter(
+            Q(user_id=user_id) | Q(editor_id=user_id)
+        ).distinct()
 
         data = []
         for p in projects:
-            data.append({
-                "id": p.id,
-                "name": p.name,
-                "video": p.video.url if p.video else None
-            })
-
-        return JsonResponse(data, safe=False)
-
-    # ---------------- POST ----------------
-    elif request.method == 'POST':
-        name = request.data.get("name")
-        user_id = request.data.get("user_id")
-        editor_username = request.data.get("editor_username")  # ✅ CHANGED
-        video = request.FILES.get("video")
-
-        # ✅ get creator
-        user = AppUser.objects.filter(id=user_id).first()
-        if not user:
-            return JsonResponse({"error": "User not found"}, status=400)
-
-        # ✅ find editor by username
-        editor = None
-        if editor_username:
-            editor = AppUser.objects.filter(
-                name=editor_username,
-                role="editor"
-            ).first()
-
-            if not editor:
-                return JsonResponse({"error": "Editor not found"}, status=400)
-
-        # ✅ fix filename
-        if video:
-            video.name = f"{uuid.uuid4().hex}.mp4"
-
-        # ✅ create project (NO editor assigned yet)
-        project = Project.objects.create(
-            name=name,
-            user=user,
-            video=video
-        )
-
-        # ✅ create invitation
-        if editor:
-            ProjectInvitation.objects.create(
-                project=project,
-                creator=user,
-                editor=editor,
-                status="pending"
-            )
-
-        return JsonResponse({
-            "message": "Project created and invitation sent"
-        })
-    
-@csrf_exempt
-@api_view(['GET', 'POST'])
-def projects(request):
-
-    # ---------------- GET ----------------
-    if request.method == 'GET':
-        user_id = request.GET.get("user_id")
-
-        projects = Project.objects.filter(user_id=user_id)
-
-        data = []
-        for p in projects:
-            # 🔥 GET INVITATION STATUS
             invite = ProjectInvitation.objects.filter(project=p).first()
 
             status = "none"
             if invite:
-                status = invite.status  # pending / accepted / rejected
+                status = invite.status
 
             data.append({
                 "id": p.id,
                 "name": p.name,
                 "video": p.video.url if p.video else None,
-                "invite_status": status  # ✅ NEW FIELD
+                "invite_status": status
             })
 
         return JsonResponse(data, safe=False)
@@ -169,12 +105,10 @@ def projects(request):
         editor_username = request.data.get("editor_username")
         video = request.FILES.get("video")
 
-        # ✅ GET CREATOR
         user = AppUser.objects.filter(id=user_id).first()
         if not user:
             return JsonResponse({"error": "User not found"}, status=400)
 
-        # ✅ FIND EDITOR
         editor = None
         if editor_username:
             editor = AppUser.objects.filter(
@@ -187,19 +121,15 @@ def projects(request):
                     "error": f"Editor '{editor_username}' not found"
                 }, status=400)
 
-        # ✅ FIX FILE NAME
-        import uuid
         if video:
             video.name = f"{uuid.uuid4().hex}.mp4"
 
-        # ✅ CREATE PROJECT (NO editor assigned yet)
         project = Project.objects.create(
             name=name,
             user=user,
             video=video
         )
 
-        # ✅ CREATE INVITATION
         if editor:
             ProjectInvitation.objects.create(
                 project=project,
@@ -212,6 +142,78 @@ def projects(request):
             "message": "Project created and invitation sent"
         })
     
+from django.db.models import Q
+
+@csrf_exempt
+@api_view(['GET', 'POST'])
+def projects(request):
+
+    if request.method == 'GET':
+        user_id = request.GET.get("user_id")
+
+        projects = Project.objects.filter(
+            Q(user_id=user_id) | Q(editor_id=user_id)
+        ).distinct()
+
+        data = []
+        for p in projects:
+            invite = ProjectInvitation.objects.filter(project=p).first()
+
+            status = "none"
+            if invite:
+                status = invite.status
+
+            data.append({
+                "id": p.id,
+                "name": p.name,
+                "video": p.video.url if p.video else None,
+                "invite_status": status,
+                "creator_id": p.user.id,
+                "editor_id": p.editor.id if p.editor else None,
+            })
+
+        return JsonResponse(data, safe=False)
+
+    elif request.method == 'POST':
+        name = request.data.get("name")
+        user_id = request.data.get("user_id")
+        editor_username = request.data.get("editor_username")
+        video = request.FILES.get("video")
+
+        user = AppUser.objects.filter(id=user_id).first()
+        if not user:
+            return JsonResponse({"error": "User not found"}, status=400)
+
+        editor = None
+        if editor_username:
+            editor = AppUser.objects.filter(
+                name__iexact=editor_username.strip(),
+                role="editor"
+            ).first()
+
+            if not editor:
+                return JsonResponse({"error": "Editor not found"}, status=400)
+
+        if video:
+            video.name = f"{uuid.uuid4().hex}.mp4"
+
+        project = Project.objects.create(
+            name=name,
+            user=user,
+            video=video
+        )
+
+        if editor:
+            ProjectInvitation.objects.create(
+                project=project,
+                creator=user,
+                editor=editor,
+                status="pending"
+            )
+
+        return JsonResponse({
+            "message": "Project created and invitation sent"
+        })
 @api_view(['GET'])
 def get_invitations(request):
     editor_id = request.GET.get("editor_id")
@@ -243,15 +245,14 @@ def respond_invitation(request):
 
     if action == "accept":
         invite.status = "accepted"
+
+        # 🔥 THIS IS THE MOST IMPORTANT LINE
         invite.project.editor = invite.editor
         invite.project.save()
 
     elif action == "reject":
         invite.status = "rejected"
 
-    else:
-        return JsonResponse({"error": "Invalid action"}, status=400)
-
     invite.save()
 
-    return JsonResponse({"message": "Invitation updated"})
+    return JsonResponse({"message": "Updated"})
