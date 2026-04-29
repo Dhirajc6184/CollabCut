@@ -8,6 +8,7 @@ function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
   const [videoFile, setVideoFile] = useState(null);
   const [editorUsername, setEditorUsername] = useState("");
   const [error, setError] = useState("");
+  const [hasInvites, setHasInvites] = useState(false);
 
   // ---------------- FETCH PROJECTS ----------------
   const fetchProjects = async () => {
@@ -18,6 +19,22 @@ function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
       setProjects(res.data);
     } catch {
       setError("Failed to load projects");
+    }
+  };
+
+  // ---------------- HAS INVITES ----------------
+  const checkInvites = async () => {
+    if (!user?.id || user?.role !== "editor") {
+      setHasInvites(false);
+      return;
+    }
+
+    try {
+      const res = await API.get(`invitations/?editor_id=${user.id}`);
+      setHasInvites(res.data.length > 0);
+    } catch (err) {
+      console.log("INVITE CHECK ERROR:", err.response?.data || err);
+      setHasInvites(false);
     }
   };
 
@@ -48,13 +65,13 @@ function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
         },
       });
 
-      // reset
       setProjectName("");
       setVideoFile(null);
       setEditorUsername("");
       setError("");
 
       fetchProjects();
+      checkInvites();
     } catch (err) {
       console.log("PROJECT ERROR:", err.response?.data);
       setError(err.response?.data?.error || "Project creation failed");
@@ -69,6 +86,7 @@ function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
 
   useEffect(() => {
     fetchProjects();
+    checkInvites();
   }, [user]);
 
   return (
@@ -86,6 +104,7 @@ function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
           {user?.role === "editor" && (
             <button className="invite-icon" onClick={goToInvites}>
               🔔
+              {hasInvites && <span className="notify-dot"></span>}
             </button>
           )}
 

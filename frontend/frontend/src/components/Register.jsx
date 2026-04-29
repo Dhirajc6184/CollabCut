@@ -162,7 +162,7 @@ function Register({ switchToLogin }) {
                 required
               >
                 <option value="">select role</option>
-                <option value="editer">Editer</option>
+                <option value="editor">Editor</option>
                 <option value="viewer">Viewer</option>
               </select>
 
