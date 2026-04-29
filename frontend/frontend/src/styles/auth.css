@@ -284,9 +284,9 @@ body {
   right: 3px;
   width: 9px;
   height: 9px;
-  background:  #22C55E;
+  background:  #00ff5e;
   border-radius: 50%;
-  box-shadow: 0 0 10px  #22C55E;
+  box-shadow: 0 0 10px  #00ff5e;
 }
 
 .auth-left {
