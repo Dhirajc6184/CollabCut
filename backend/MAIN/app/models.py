@@ -4,7 +4,7 @@ from django.contrib.auth.hashers import make_password, check_password
 
 class AppUser(models.Model):
     ROLE_CHOICES = [
-        ('creator', 'Creator'),
+        ('viewer', 'Viewer'),
         ('editor', 'Editor'),
     ]
 
