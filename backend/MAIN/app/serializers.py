@@ -24,4 +24,4 @@ class RegisterSerializer(serializers.ModelSerializer):
 class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'name', 'user', 'created_at']
+        fields = ['id', 'name', 'user', 'editor', 'video']
