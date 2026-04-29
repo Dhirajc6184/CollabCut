@@ -38,3 +38,18 @@ class Project(models.Model):
     
     def __str__(self):
         return f"{self.name}"
+
+class ProjectInvitation(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("accepted", "Accepted"),
+        ("rejected", "Rejected"),
+    ]
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    creator = models.ForeignKey(AppUser, on_delete=models.CASCADE, related_name="sent_invites")
+    editor = models.ForeignKey(AppUser, on_delete=models.CASCADE, related_name="received_invites")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
+
+    def __str__(self):
+        return f"{self.project.name} -> {self.editor.name} ({self.status})"

@@ -97,6 +97,131 @@ body {
   border: 1px solid #1F2933;
 }
 
+.invite-item {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #1F2933;
+  border-radius: 6px;
+}
+
+.invite-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 15px;
+  color: #9CA3AF;
+  font-size: 12px;
+}
+
+
+.invite-card {
+  max-width: 100%;
+  margin-top: 28px;
+}
+
+.invite-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.invite-table th,
+.invite-table td {
+  border-bottom: 1px solid #1F2933;
+  padding: 12px 10px;
+  text-align: left;
+  color: #E5E7EB;
+}
+
+.invite-table th {
+  color: #6B7280;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.decision-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.accept-btn,
+.decline-btn,
+.submit-response-btn {
+  border: none;
+  border-radius: 5px;
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.accept-btn {
+  background: transparent;
+  color: #22C55E;
+  border: 1px solid #22C55E;
+}
+
+.accept-btn.selected {
+  background: #22C55E;
+  color: #05080A;
+}
+
+.decline-btn {
+  background: transparent;
+  color: #ff6b6b;
+  border: 1px solid #ff6b6b;
+}
+
+.decline-btn.selected {
+  background: #ff6b6b;
+  color: #05080A;
+}
+
+.submit-response-btn {
+  background: #11161A;
+  color: #E5E7EB;
+  border: 1px solid #1F2933;
+}
+
+.submit-response-btn:hover {
+  border-color: #22C55E;
+  color: #22C55E;
+}
+
+
+.project-card {
+  position: relative;
+}
+
+.status-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.status-dot.pending {
+  background: gray;
+}
+
+.status-dot.accepted {
+  background: #22C55E;
+  box-shadow: 0 0 8px #22C55E;
+}
+
+.status-dot.rejected {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+}
+
+.status-dot.none {
+  background: #6B7280;
+}
+
+
 .auth-left {
   padding: 48px 35px 40px;
   border-right: 1px solid #1F2933;

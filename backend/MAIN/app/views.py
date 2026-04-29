@@ -1,14 +1,18 @@
+from .models import Project, AppUser, ProjectInvitation
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-from .models import AppUser, Project
 from .serializers import RegisterSerializer, ProjectSerializer
 from rest_framework.decorators import api_view
-import os
+import uuid
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view
+from .models import Project, AppUser, ProjectInvitation
+
 
 @csrf_exempt
-
 @api_view(['POST'])
 def register(request):
     name = request.data.get("name")
@@ -61,12 +65,16 @@ def login(request):
     return Response({"error": "Invalid password"}, status=400)
 
 
+
+
 @csrf_exempt
 @api_view(['GET', 'POST'])
 def projects(request):
 
+    # ---------------- GET ----------------
     if request.method == 'GET':
         user_id = request.GET.get("user_id")
+
         projects = Project.objects.filter(user_id=user_id)
 
         data = []
@@ -79,51 +87,171 @@ def projects(request):
 
         return JsonResponse(data, safe=False)
 
+    # ---------------- POST ----------------
     elif request.method == 'POST':
         name = request.data.get("name")
         user_id = request.data.get("user_id")
-        editor_email = request.data.get("editor_email")
+        editor_username = request.data.get("editor_username")  # ✅ CHANGED
         video = request.FILES.get("video")
 
-    user = AppUser.objects.filter(id=user_id).first()
-    if not user:
-        return JsonResponse({"error": "User not found"}, status=400)
+        # ✅ get creator
+        user = AppUser.objects.filter(id=user_id).first()
+        if not user:
+            return JsonResponse({"error": "User not found"}, status=400)
 
-    editor = None
-    if editor_email:
-        editor = AppUser.objects.filter(email=editor_email).first()
+        # ✅ find editor by username
+        editor = None
+        if editor_username:
+            editor = AppUser.objects.filter(
+                name=editor_username,
+                role="editor"
+            ).first()
 
-    # 🔥 FIX: shorten filename
-    import uuid
-    if video:
-        video.name = f"{uuid.uuid4().hex}.mp4"
+            if not editor:
+                return JsonResponse({"error": "Editor not found"}, status=400)
 
-    Project.objects.create(
-        name=name,
-        user=user,
-        editor=editor,
-        video=video
-    )
+        # ✅ fix filename
+        if video:
+            video.name = f"{uuid.uuid4().hex}.mp4"
 
-    return JsonResponse({"message": "Project created"})
+        # ✅ create project (NO editor assigned yet)
+        project = Project.objects.create(
+            name=name,
+            user=user,
+            video=video
+        )
+
+        # ✅ create invitation
+        if editor:
+            ProjectInvitation.objects.create(
+                project=project,
+                creator=user,
+                editor=editor,
+                status="pending"
+            )
+
+        return JsonResponse({
+            "message": "Project created and invitation sent"
+        })
     
-def create_project(request):
-    name = request.POST.get("name")
-    user_id = request.POST.get("user_id")
-    editor_id = request.POST.get("editor_id")
-    video = request.FILES.get("video")
+@csrf_exempt
+@api_view(['GET', 'POST'])
+def projects(request):
 
-    user = AppUser.objects.get(id=user_id)
+    # ---------------- GET ----------------
+    if request.method == 'GET':
+        user_id = request.GET.get("user_id")
 
-    editor = None
-    if editor_id:
-        editor = AppUser.objects.filter(id=editor_id, role="editor").first()
+        projects = Project.objects.filter(user_id=user_id)
 
-    project = Project.objects.create(
-        name=name,
-        user=user,
-        editor=editor,
-        video=video
+        data = []
+        for p in projects:
+            # 🔥 GET INVITATION STATUS
+            invite = ProjectInvitation.objects.filter(project=p).first()
+
+            status = "none"
+            if invite:
+                status = invite.status  # pending / accepted / rejected
+
+            data.append({
+                "id": p.id,
+                "name": p.name,
+                "video": p.video.url if p.video else None,
+                "invite_status": status  # ✅ NEW FIELD
+            })
+
+        return JsonResponse(data, safe=False)
+
+    # ---------------- POST ----------------
+    elif request.method == 'POST':
+        name = request.data.get("name")
+        user_id = request.data.get("user_id")
+        editor_username = request.data.get("editor_username")
+        video = request.FILES.get("video")
+
+        # ✅ GET CREATOR
+        user = AppUser.objects.filter(id=user_id).first()
+        if not user:
+            return JsonResponse({"error": "User not found"}, status=400)
+
+        # ✅ FIND EDITOR
+        editor = None
+        if editor_username:
+            editor = AppUser.objects.filter(
+                name__iexact=editor_username.strip(),
+                role="editor"
+            ).first()
+
+            if not editor:
+                return JsonResponse({
+                    "error": f"Editor '{editor_username}' not found"
+                }, status=400)
+
+        # ✅ FIX FILE NAME
+        import uuid
+        if video:
+            video.name = f"{uuid.uuid4().hex}.mp4"
+
+        # ✅ CREATE PROJECT (NO editor assigned yet)
+        project = Project.objects.create(
+            name=name,
+            user=user,
+            video=video
+        )
+
+        # ✅ CREATE INVITATION
+        if editor:
+            ProjectInvitation.objects.create(
+                project=project,
+                creator=user,
+                editor=editor,
+                status="pending"
+            )
+
+        return JsonResponse({
+            "message": "Project created and invitation sent"
+        })
+    
+@api_view(['GET'])
+def get_invitations(request):
+    editor_id = request.GET.get("editor_id")
+
+    invites = ProjectInvitation.objects.filter(
+        editor_id=editor_id,
+        status="pending"
     )
 
-    return JsonResponse({"message": "Project created"})
+    data = []
+    for i in invites:
+        data.append({
+            "id": i.id,
+            "project_name": i.project.name,
+            "creator": i.creator.name
+        })
+
+    return JsonResponse(data, safe=False)
+
+@api_view(['POST'])
+def respond_invitation(request):
+    invite_id = request.data.get("invite_id")
+    action = request.data.get("action")
+
+    invite = ProjectInvitation.objects.filter(id=invite_id).first()
+
+    if not invite:
+        return JsonResponse({"error": "Invalid invite"}, status=400)
+
+    if action == "accept":
+        invite.status = "accepted"
+        invite.project.editor = invite.editor
+        invite.project.save()
+
+    elif action == "reject":
+        invite.status = "rejected"
+
+    else:
+        return JsonResponse({"error": "Invalid action"}, status=400)
+
+    invite.save()
+
+    return JsonResponse({"message": "Invitation updated"})
