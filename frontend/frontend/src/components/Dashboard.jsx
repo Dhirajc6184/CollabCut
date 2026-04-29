@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import API from "../api/api";
-import Invitations from "./Invitations";
 import "../styles/auth.css";
 
-function Dashboard({ user, onLogout, onOpenProject }) {
+function Dashboard({ user, onLogout, onOpenProject, goToInvites }) {
   const [projects, setProjects] = useState([]);
   const [projectName, setProjectName] = useState("");
   const [videoFile, setVideoFile] = useState(null);
   const [editorUsername, setEditorUsername] = useState("");
   const [error, setError] = useState("");
 
+  // ---------------- FETCH PROJECTS ----------------
   const fetchProjects = async () => {
     if (!user?.id) return;
 
@@ -21,6 +21,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
     }
   };
 
+  // ---------------- CREATE PROJECT ----------------
   const createProject = async () => {
     if (!projectName.trim()) {
       setError("Project name is required");
@@ -29,6 +30,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
 
     try {
       const formData = new FormData();
+
       formData.append("name", projectName);
       formData.append("user_id", user.id);
 
@@ -46,6 +48,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
         },
       });
 
+      // reset
       setProjectName("");
       setVideoFile(null);
       setEditorUsername("");
@@ -58,6 +61,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
     }
   };
 
+  // ---------------- LOGOUT ----------------
   const handleLogout = () => {
     localStorage.removeItem("user");
     onLogout();
@@ -69,18 +73,30 @@ function Dashboard({ user, onLogout, onOpenProject }) {
 
   return (
     <div className="dashboard-page">
+      {/* NAVBAR */}
       <div className="dashboard-navbar">
         <div>
           <h2>CollabCut</h2>
           <p>video collaboration workspace</p>
         </div>
 
-        <button className="logout-btn" onClick={handleLogout}>
-          sign out →
-        </button>
+        {/* RIGHT SIDE */}
+        <div className="navbar-right">
+          {/* 🔔 ONLY FOR EDITOR */}
+          {user?.role === "editor" && (
+            <button className="invite-icon" onClick={goToInvites}>
+              🔔
+            </button>
+          )}
+
+          <button className="logout-btn" onClick={handleLogout}>
+            sign out →
+          </button>
+        </div>
       </div>
 
       <div className="dashboard-content">
+        {/* HEADER */}
         <div className="dashboard-header">
           <h1>Dashboard</h1>
           <p>
@@ -88,6 +104,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
           </p>
         </div>
 
+        {/* CREATE PROJECT */}
         <div className="dashboard-card">
           <h3>Create Project</h3>
 
@@ -124,8 +141,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
           {error && <p className="error">{error}</p>}
         </div>
 
-        {user?.role === "editor" && <Invitations user={user} />}
-
+        {/* PROJECT LIST */}
         <div className="project-grid">
           {projects.map((project) => (
             <div
@@ -133,6 +149,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
               className="project-card clickable"
               onClick={() => onOpenProject(project)}
             >
+              {/* 🟢 STATUS DOT */}
               <span
                 className={`status-dot ${project.invite_status}`}
                 title={project.invite_status}
@@ -140,6 +157,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
 
               <h3>{project.name}</h3>
               <p>Project ID: {project.id}</p>
+
               {project.video && <p>Video Available</p>}
             </div>
           ))}
