@@ -329,7 +329,7 @@ select:focus {
   border: 1px solid #1F2933;
   border-radius: 8px;
   padding: 26px;
-  max-width: 520px;
+  
 }
 
 .dashboard-card h3 {
