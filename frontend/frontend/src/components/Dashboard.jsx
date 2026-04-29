@@ -5,21 +5,18 @@ import "../styles/auth.css";
 function Dashboard({ user, onLogout }) {
   const [projects, setProjects] = useState([]);
   const [projectName, setProjectName] = useState("");
+  const [videoFile, setVideoFile] = useState(null);
+  const [editorEmail, setEditorEmail] = useState("");
   const [error, setError] = useState("");
 
   const fetchProjects = async () => {
-    if (!user?.id) {
-      setError("User not found. Please login again.");
-      return;
-    }
+    if (!user?.id) return;
 
     try {
-      const response = await API.get(`projects/?user_id=${user.id}`);
-      setProjects(response.data);
-      setError("");
-    } catch (error) {
-      console.log("FETCH PROJECT ERROR:", error.response?.data);
-      setError(error.response?.data?.error || "Failed to load projects");
+      const res = await API.get(`projects/?user_id=${user.id}`);
+      setProjects(res.data);
+    } catch (err) {
+      setError("Failed to load projects");
     }
   };
 
@@ -29,48 +26,43 @@ function Dashboard({ user, onLogout }) {
       return;
     }
 
-    if (!user?.id) {
-      setError("User not found. Please login again.");
-      return;
-    }
-
     try {
-      const response = await API.post("projects/", {
-        name: projectName,
-        user_id: user.id,
+      const formData = new FormData();
+      formData.append("name", projectName);
+      formData.append("user_id", user.id);
+
+      if (videoFile) {
+        formData.append("video", videoFile);
+      }
+
+      if (editorEmail.trim()) {
+        formData.append("editor_email", editorEmail);
+      }
+
+      await API.post("projects/", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       });
 
-      console.log("PROJECT CREATED:", response.data);
-
       setProjectName("");
+      setVideoFile(null);
+      setEditorEmail("");
       setError("");
-      fetchProjects();
-    } catch (error) {
-      console.log("CREATE PROJECT ERROR:", error.response?.data);
 
-      setError(
-        error.response?.data?.error ||
-          JSON.stringify(error.response?.data) ||
-          "Failed to create project"
-      );
+      fetchProjects();
+    } catch (err) {
+      setError("Project creation failed");
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("user");
-    sessionStorage.clear();
-
-    if (onLogout) {
-      onLogout();
-    } else {
-      window.location.reload();
-    }
+    onLogout();
   };
 
   useEffect(() => {
-    if (user?.id) {
-      fetchProjects();
-    }
+    fetchProjects();
   }, [user]);
 
   return (
@@ -99,7 +91,7 @@ function Dashboard({ user, onLogout }) {
 
           <input
             type="text"
-            placeholder="enter project name"
+            placeholder="Enter project name"
             value={projectName}
             onChange={(e) => {
               setProjectName(e.target.value);
@@ -107,8 +99,27 @@ function Dashboard({ user, onLogout }) {
             }}
           />
 
+          <input
+            type="file"
+            accept="video/mp4"
+            onChange={(e) => {
+              setVideoFile(e.target.files[0]);
+              setError("");
+            }}
+          />
+
+          <input
+            type="email"
+            placeholder="Enter editor email"
+            value={editorEmail}
+            onChange={(e) => {
+              setEditorEmail(e.target.value);
+              setError("");
+            }}
+          />
+
           <button type="button" onClick={createProject}>
-            create project →
+            Create Project →
           </button>
 
           {error && <p className="error">{error}</p>}

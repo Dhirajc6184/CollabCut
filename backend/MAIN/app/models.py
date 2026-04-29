@@ -24,9 +24,17 @@ class AppUser(models.Model):
 
 
 class Project(models.Model):
-    user = models.ForeignKey(AppUser, on_delete=models.CASCADE, related_name="projects")
-    name = models.CharField(max_length=150)
+    name = models.CharField(max_length=255)
+    user = models.ForeignKey(AppUser, on_delete=models.CASCADE)
+    editor = models.ForeignKey(
+        AppUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_projects"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
-
+    video = models.FileField(upload_to="videos/", null=True, blank=True)
+    
     def __str__(self):
-        return self.name
+        return f"{self.name})"
