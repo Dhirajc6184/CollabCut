@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import API from "../api/api";
 import "../styles/auth.css";
 
-function Dashboard({ user, onLogout }) {
+function Dashboard({ user, onLogout, onOpenProject }) {
   const [projects, setProjects] = useState([]);
   const [projectName, setProjectName] = useState("");
   const [videoFile, setVideoFile] = useState(null);
@@ -15,7 +15,7 @@ function Dashboard({ user, onLogout }) {
     try {
       const res = await API.get(`projects/?user_id=${user.id}`);
       setProjects(res.data);
-    } catch (err) {
+    } catch {
       setError("Failed to load projects");
     }
   };
@@ -40,9 +40,7 @@ function Dashboard({ user, onLogout }) {
       }
 
       await API.post("projects/", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+        headers: { "Content-Type": "multipart/form-data" },
       });
 
       setProjectName("");
@@ -51,14 +49,9 @@ function Dashboard({ user, onLogout }) {
       setError("");
 
       fetchProjects();
-    } catch (err) {
+    } catch {
       setError("Project creation failed");
     }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    onLogout();
   };
 
   useEffect(() => {
@@ -73,19 +66,20 @@ function Dashboard({ user, onLogout }) {
           <p>video collaboration workspace</p>
         </div>
 
-        <button className="logout-btn" onClick={handleLogout}>
+        <button className="logout-btn" onClick={onLogout}>
           sign out →
         </button>
       </div>
 
       <div className="dashboard-content">
         <div className="dashboard-header">
-          <h1>Video Collaboration Dashboard</h1>
+          <h1>Dashboard</h1>
           <p>
-            Welcome, <b>{user?.name}</b> <span>({user?.role})</span>
+            Welcome, <b>{user?.name}</b> ({user?.role})
           </p>
         </div>
 
+        {/* CREATE PROJECT */}
         <div className="dashboard-card">
           <h3>Create Project</h3>
 
@@ -102,32 +96,31 @@ function Dashboard({ user, onLogout }) {
           <input
             type="file"
             accept="video/mp4"
-            onChange={(e) => {
-              setVideoFile(e.target.files[0]);
-              setError("");
-            }}
+            onChange={(e) => setVideoFile(e.target.files[0])}
           />
 
           <input
             type="email"
             placeholder="Enter editor email"
             value={editorEmail}
-            onChange={(e) => {
-              setEditorEmail(e.target.value);
-              setError("");
-            }}
+            onChange={(e) => setEditorEmail(e.target.value)}
           />
 
-          <button type="button" onClick={createProject}>
+          <button onClick={createProject}>
             Create Project →
           </button>
 
           {error && <p className="error">{error}</p>}
         </div>
 
+        {/* PROJECT LIST */}
         <div className="project-grid">
           {projects.map((project) => (
-            <div className="project-card" key={project.id}>
+            <div
+              key={project.id}
+              className="project-card clickable"
+              onClick={() => onOpenProject(project)}
+            >
               <h3>{project.name}</h3>
               <p>Project ID: {project.id}</p>
             </div>

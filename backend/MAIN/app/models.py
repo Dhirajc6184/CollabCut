@@ -37,4 +37,4 @@ class Project(models.Model):
     video = models.FileField(upload_to="videos/", null=True, blank=True)
     
     def __str__(self):
-        return f"{self.name})"
+        return f"{self.name}"
