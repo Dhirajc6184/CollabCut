@@ -118,8 +118,12 @@ export default function ViewerProjectPage({ project, user, token, onBack }) {
               <div
                 style={{ flex: 1, height: 4, background: "#222", borderRadius: 2, cursor: "pointer", position: "relative" }}
                 onClick={(e) => {
+                  const v = videoRef.current;
+                  const wasPlaying = v && !v.paused && !v.ended;
+                  if (wasPlaying) v.pause();
                   const r = e.currentTarget.getBoundingClientRect();
                   seek(((e.clientX - r.left) / r.width) * duration);
+                  if (wasPlaying && v) setTimeout(() => v.play().catch(() => {}), 50);
                 }}
               >
                 <div style={{

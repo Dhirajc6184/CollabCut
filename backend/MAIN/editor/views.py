@@ -1,15 +1,4 @@
 # FILE PATH: backend/MAIN/editor/views.py
-#
-# All editor-side API endpoints:
-#   POST   /api/editor/upload/                          → upload video for editing
-#   POST   /api/editor/process/                         → run FFmpeg pipeline
-#   GET    /api/editor/files/<filename>/                → serve upload/output files
-#   GET    /api/editor/comments/<project_id>/           → list comments
-#   POST   /api/editor/comments/<project_id>/           → post comment (viewers only)
-#   DELETE /api/editor/comments/<project_id>/<id>/      → delete comment
-#   POST   /api/editor/scene-extract/                   → start OpenCV scene job
-#   GET    /api/editor/scene-extract/<job_id>/          → poll job status
-#   GET    /api/editor/health/                          → server health
 
 import os
 import uuid
@@ -32,12 +21,28 @@ from .authentication import JWTAuthentication
 from .models import VideoComment
 
 
+def resolve_video_path(filename):
+    """
+    Resolve video path from:
+    1. editor uploads/
+    2. main project media/videos/
+    """
+    upload_path = settings.UPLOAD_DIR / filename
+    if upload_path.exists():
+        return upload_path
+
+    media_video_path = Path(settings.MEDIA_ROOT) / "videos" / filename
+    if media_video_path.exists():
+        return media_video_path
+
+    return None
+
+
 # ── FFmpeg pipeline builder ────────────────────────────────────────────────────
 
 def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
     cmd = ["ffmpeg", "-y"]
 
-    # Seek flags must come before -i for fast seeking
     for op in operations:
         if op["id"] == "trim":
             if op["vals"].get("start"):
@@ -55,7 +60,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
         vals  = op.get("vals", {})
 
         if op_id == "trim":
-            pass  # handled above
+            pass
         elif op_id == "resize":
             vfilters.append(f"scale={vals.get('width', 1280)}:{vals.get('height', -1)}")
         elif op_id == "crop":
@@ -64,8 +69,9 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
                 f":{vals.get('x', 0)}:{vals.get('y', 0)}"
             )
         elif op_id == "text":
+            safe_text = str(vals.get("text", "Hello")).replace("'", "\\'")
             vfilters.append(
-                f"drawtext=text='{vals.get('text', 'Hello')}'"
+                f"drawtext=text='{safe_text}'"
                 f":x={vals.get('x', 50)}:y={vals.get('y', 50)}"
                 f":fontsize={vals.get('size', 40)}:fontcolor={vals.get('color', 'white')}"
             )
@@ -111,8 +117,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
 def upload_video(request):
     """
     Upload a video file into the editor's UPLOAD_DIR.
-    Only editors may upload (viewers uploaded the project video at creation time).
-    Returns filename + metadata for the frontend.
+    Only editors may upload.
     """
     if request.user.role != "editor":
         return Response(
@@ -135,7 +140,6 @@ def upload_video(request):
         for chunk in file.chunks():
             f.write(chunk)
 
-    # Probe metadata with ffprobe
     probe = subprocess.run(
         ["ffprobe", "-v", "quiet", "-print_format", "json",
          "-show_streams", "-show_format", str(dest)],
@@ -168,7 +172,7 @@ def upload_video(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def process_video(request):
-    """Run the FFmpeg pipeline on a previously-uploaded video."""
+    """Run the FFmpeg pipeline on a previously-uploaded OR project video."""
     if request.user.role != "editor":
         return Response(
             {"detail": "Only editors can process videos."},
@@ -182,9 +186,14 @@ def process_video(request):
     if not input_filename:
         return Response({"detail": "input_filename is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    input_path = settings.UPLOAD_DIR / input_filename
-    if not input_path.exists():
-        return Response({"detail": "Input file not found"}, status=status.HTTP_404_NOT_FOUND)
+    # FIX: use resolve_video_path so project videos in media/videos/ also work
+    input_path = resolve_video_path(input_filename)
+
+    if input_path is None:
+        return Response(
+            {"detail": f"Input file not found: {input_filename}"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
     out_name = output_filename or f"output_{uuid.uuid4().hex[:8]}.mp4"
     if not out_name.endswith(".mp4"):
@@ -265,7 +274,6 @@ def comments(request, project_id):
     if not ser.is_valid():
         return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # Look up the display name from AppUser (so we store the real name)
     from app.models import AppUser
     try:
         app_user    = AppUser.objects.get(id=request.user.id)
@@ -308,9 +316,9 @@ def comment_detail(request, project_id, comment_id):
 
 # ── Scene Extraction ───────────────────────────────────────────────────────────
 
-SCENE_JOBS = {}      # in-memory job store; fine for a hackathon
+SCENE_JOBS = {}
 NUM_SCENES = 3
-MAX_PCT    = 50      # extract at most 50% of video duration
+MAX_PCT    = 50
 
 
 def _fmt_time(seconds):
@@ -464,8 +472,10 @@ def scene_extract(request):
     if not filename:
         return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    filepath = settings.UPLOAD_DIR / filename
-    if not filepath.exists():
+    # FIX: also check media/videos/ for project videos
+    filepath = resolve_video_path(filename)
+
+    if filepath is None:
         return Response(
             {"detail": "File not found. Upload the video first."},
             status=status.HTTP_404_NOT_FOUND,
@@ -474,7 +484,9 @@ def scene_extract(request):
     job_id = str(uuid.uuid4())
     SCENE_JOBS[job_id] = {"status": "queued"}
     threading.Thread(
-        target=_analyse_video, args=(job_id, str(filepath)), daemon=True
+        target=_analyse_video,
+        args=(job_id, str(filepath)),
+        daemon=True
     ).start()
     return Response({"job_id": job_id}, status=status.HTTP_202_ACCEPTED)
 
