@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import API from "../api/api";
+import Invitations from "./Invitations";
 import "../styles/auth.css";
 
 function Dashboard({ user, onLogout, onOpenProject }) {
   const [projects, setProjects] = useState([]);
   const [projectName, setProjectName] = useState("");
   const [videoFile, setVideoFile] = useState(null);
-  const [editorEmail, setEditorEmail] = useState("");
+  const [editorUsername, setEditorUsername] = useState("");
   const [error, setError] = useState("");
 
   const fetchProjects = async () => {
@@ -35,23 +36,31 @@ function Dashboard({ user, onLogout, onOpenProject }) {
         formData.append("video", videoFile);
       }
 
-      if (editorEmail.trim()) {
-        formData.append("editor_email", editorEmail);
+      if (editorUsername.trim()) {
+        formData.append("editor_username", editorUsername);
       }
 
       await API.post("projects/", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       });
 
       setProjectName("");
       setVideoFile(null);
-      setEditorEmail("");
+      setEditorUsername("");
       setError("");
 
       fetchProjects();
-    } catch {
-      setError("Project creation failed");
+    } catch (err) {
+      console.log("PROJECT ERROR:", err.response?.data);
+      setError(err.response?.data?.error || "Project creation failed");
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    onLogout();
   };
 
   useEffect(() => {
@@ -66,7 +75,7 @@ function Dashboard({ user, onLogout, onOpenProject }) {
           <p>video collaboration workspace</p>
         </div>
 
-        <button className="logout-btn" onClick={onLogout}>
+        <button className="logout-btn" onClick={handleLogout}>
           sign out →
         </button>
       </div>
@@ -79,7 +88,6 @@ function Dashboard({ user, onLogout, onOpenProject }) {
           </p>
         </div>
 
-        {/* CREATE PROJECT */}
         <div className="dashboard-card">
           <h3>Create Project</h3>
 
@@ -100,20 +108,24 @@ function Dashboard({ user, onLogout, onOpenProject }) {
           />
 
           <input
-            type="email"
-            placeholder="Enter editor email"
-            value={editorEmail}
-            onChange={(e) => setEditorEmail(e.target.value)}
+            type="text"
+            placeholder="Enter editor username"
+            value={editorUsername}
+            onChange={(e) => {
+              setEditorUsername(e.target.value);
+              setError("");
+            }}
           />
 
-          <button onClick={createProject}>
+          <button type="button" onClick={createProject}>
             Create Project →
           </button>
 
           {error && <p className="error">{error}</p>}
         </div>
 
-        {/* PROJECT LIST */}
+        {user?.role === "editor" && <Invitations user={user} />}
+
         <div className="project-grid">
           {projects.map((project) => (
             <div
@@ -121,8 +133,14 @@ function Dashboard({ user, onLogout, onOpenProject }) {
               className="project-card clickable"
               onClick={() => onOpenProject(project)}
             >
+              <span
+                className={`status-dot ${project.invite_status}`}
+                title={project.invite_status}
+              ></span>
+
               <h3>{project.name}</h3>
               <p>Project ID: {project.id}</p>
+              {project.video && <p>Video Available</p>}
             </div>
           ))}
         </div>

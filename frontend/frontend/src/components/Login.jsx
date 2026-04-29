@@ -53,7 +53,7 @@ function Login({ switchToRegister, onLoginSuccess }) {
         <div className="auth-left">
           <div className="play-icon">▶</div>
 
-          <h1>ColabCut</h1>
+          <h1>CollabCut</h1>
           <p className="subtitle">video processing pipeline</p>
 
 <div className="logo-container">
