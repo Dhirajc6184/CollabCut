@@ -221,6 +221,59 @@ body {
   background: #6B7280;
 }
 
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.invite-icon {
+  background: transparent;
+  border: 1px solid #1F2933;
+  color: #E5E7EB;
+  font-size: 18px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.invite-icon:hover {
+  border-color: #22C55E;
+  color: #22C55E;
+}
+
+/* STATUS DOT */
+.project-card {
+  position: relative;
+}
+
+.status-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.status-dot.pending {
+  background: gray;
+}
+
+.status-dot.accepted {
+  background: #22C55E;
+  box-shadow: 0 0 8px #22C55E;
+}
+
+.status-dot.rejected {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+}
+
+.status-dot.none {
+  background: #6B7280;
+}
+
 
 .auth-left {
   padding: 48px 35px 40px;
