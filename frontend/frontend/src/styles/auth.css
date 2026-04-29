@@ -267,6 +267,26 @@ select:focus {
   font-size: 11px;
 }
 
+.logo-container {
+  margin-top: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.app-logo {
+  width: 240px;
+  height: auto;
+  opacity: 0.9;
+  transition: 0.3s ease;
+}
+
+.app-logo:hover {
+  opacity: 1;
+  transform: scale(1.05);
+  filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.4));
+}
+
 .logout-btn {
   background: transparent;
   color: #22C55E;
@@ -309,7 +329,7 @@ select:focus {
   border: 1px solid #1F2933;
   border-radius: 8px;
   padding: 26px;
-  max-width: 520px;
+  
 }
 
 .dashboard-card h3 {

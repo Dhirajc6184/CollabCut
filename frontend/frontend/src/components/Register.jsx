@@ -1,6 +1,7 @@
 import { useState } from "react";
 import API from "../api/api";
 import "../styles/auth.css";
+import logo from "../assets/logo.png";
 
 function Register({ switchToLogin }) {
   const [form, setForm] = useState({
@@ -63,22 +64,17 @@ function Register({ switchToLogin }) {
         <div className="auth-left">
           <div className="play-icon">▶</div>
 
-          <h1>FFmpeg Studio</h1>
-          <p className="subtitle">video processing pipeline</p>
+          <h1>CollabCut</h1>
+          <p className="subtitle">your video processing pipeline ... </p>
 
-          <ul className="features">
-            <li>trim, crop, resize</li>
-            <li>text overlays & effects</li>
-            <li>speed, blur, grayscale</li>
-            <li>compress & export</li>
-          </ul>
-
+<div className="logo-container">
+  <img src={logo} alt="App Logo" className="app-logo" />
+</div>
           <div className="terminal-box">
             <div className="dots">
               <span></span><span></span><span></span>
             </div>
-            <p>$ ffmpeg -i input.mp4 -vf scale=1280:-1 out.mp4</p>
-            <p>frame= 240 fps= 60 size=1024kB time=00:00:08</p>
+            <p>$ Your Friend for efficient content creation</p>
           </div>
         </div>
 

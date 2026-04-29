@@ -77,7 +77,7 @@ function Dashboard({ user, onLogout }) {
     <div className="dashboard-page">
       <div className="dashboard-navbar">
         <div>
-          <h2>FFmpeg Studio</h2>
+          <h2>CollabCut</h2>
           <p>video collaboration workspace</p>
         </div>
 
