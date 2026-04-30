@@ -12,4 +12,7 @@ urlpatterns = [
     path("scene-extract/",                                  views.scene_extract),
     path("scene-extract/<str:job_id>/",                     views.scene_extract_status),
     path("health/",                                         views.health),
+    path("transcribe/",          views.transcribe_video),
+    path("transcribe/<str:job_id>/", views.transcribe_status),
+    path("burn-subtitles/",      views.burn_subtitles),
 ]

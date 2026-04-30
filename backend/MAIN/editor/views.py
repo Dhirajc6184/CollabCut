@@ -59,45 +59,99 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
         op_id = op["id"]
         vals  = op.get("vals", {})
 
+        # ── Segment enable expressions ───────────────────────────────────────
+        seg_start = vals.get("_segment_start")
+        seg_end   = vals.get("_segment_end")
+        seg_enable = (
+            f":enable='between(t,{seg_start},{seg_end})'"
+            if seg_start is not None and seg_end is not None else ""
+        )
+
+        en_start = vals.get("_enable_start")
+        en_end   = vals.get("_enable_end")
+        text_enable = (
+            f":enable='between(t,{en_start},{en_end})'"
+            if en_start is not None and en_end is not None else ""
+        )
+
         if op_id == "trim":
             pass
+
         elif op_id == "resize":
             vfilters.append(f"scale={vals.get('width', 1280)}:{vals.get('height', -1)}")
+
         elif op_id == "crop":
             vfilters.append(
                 f"crop={vals.get('w', 720)}:{vals.get('h', 1280)}"
                 f":{vals.get('x', 0)}:{vals.get('y', 0)}"
             )
+
         elif op_id == "text":
-            safe_text = str(vals.get("text", "Hello")).replace("'", "\\'")
+            text = str(vals.get("text", "Hello")).replace("'", "\\'")
             vfilters.append(
-                f"drawtext=text='{safe_text}'"
-                f":x={vals.get('x', 50)}:y={vals.get('y', 50)}"
+                f"drawtext=text='{text}':x={vals.get('x', 50)}:y={vals.get('y', 50)}"
                 f":fontsize={vals.get('size', 40)}:fontcolor={vals.get('color', 'white')}"
+                f":box=1:boxcolor=black@0.4:boxborderw=5{text_enable}"
             )
+
         elif op_id == "speed":
-            factor = float(vals.get("factor", 2.0))
-            vfilters.append(f"setpts={round(1 / factor, 4)}*PTS")
-            afilters.append(f"atempo={factor}")
+            f = float(vals.get("factor", 2.0))
+            vfilters.append(f"setpts={round(1.0 / f, 4)}*PTS{seg_enable}")
+            if f != 1.0:
+                afilters.append(f"atempo={min(max(f, 0.5), 2.0)}")
+
         elif op_id == "grayscale":
-            vfilters.append("hue=s=0")
+            vfilters.append(f"hue=s=0{seg_enable}")
+
         elif op_id == "blur":
-            vfilters.append(f"boxblur={vals.get('amount', 10)}")
+            vfilters.append(f"boxblur={vals.get('amount', 10)}{seg_enable}")
+
         elif op_id == "brightness":
             vfilters.append(
                 f"eq=brightness={vals.get('brightness', 0.1)}"
-                f":contrast={vals.get('contrast', 1.2)}"
+                f":contrast={vals.get('contrast', 1.0)}"
+                f"{seg_enable}"
             )
+
         elif op_id == "rotate":
-            deg_map = {"90": "1", "180": "2,transpose=2", "270": "2"}
-            vfilters.append(f"transpose={deg_map.get(str(vals.get('degrees', '90')), '1')}")
+            m = {"90": "1", "180": "2,transpose=2", "270": "2"}
+            vfilters.append(f"transpose={m.get(str(vals.get('degrees', '90')), '1')}")
+
         elif op_id == "audio":
             has_audio = False
+
         elif op_id == "volume":
-            afilters.append(f"volume={vals.get('level', 2.0)}")
+            level = vals.get("level", 2.0)
+            if seg_start is not None and seg_end is not None:
+                afilters.append(f"volume={level}:enable='between(t,{seg_start},{seg_end})'")
+            else:
+                afilters.append(f"volume={level}")
+
         elif op_id == "compress":
             extra += ["-vcodec", "libx264", "-crf", str(vals.get("crf", 28)), "-preset", "fast"]
 
+        elif op_id == "subtitle":
+            srt_path = vals.get("srt_path", "")
+            if srt_path and Path(srt_path).exists():
+        # Windows: FFmpeg subtitles filter needs forward slashes
+        # and the drive colon escaped as \: inside the filtergraph string
+                safe_path = str(Path(srt_path).resolve())
+                safe_path = safe_path.replace("\\", "/")
+        # Escape the colon after drive letter: C:/path -> C\:/path
+                if len(safe_path) > 1 and safe_path[1] == ":":
+                    safe_path = safe_path[0] + "\\:" + safe_path[2:]
+                vfilters.append(
+            f"subtitles='{safe_path}':force_style='"
+            f"Alignment=2,"
+            f"FontName=Arial,"
+            f"FontSize=18,"
+            f"PrimaryColour=&H00FFFFFF,"
+            f"OutlineColour=&H00000000,"
+            f"BackColour=&H80000000,"
+            f"Outline=2,"
+            f"Shadow=1,"
+            f"MarginV=30'"
+        )
     if vfilters:
         cmd += ["-vf", ",".join(vfilters)]
     if afilters and has_audio:
@@ -141,10 +195,10 @@ def upload_video(request):
             f.write(chunk)
 
     probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json",
-         "-show_streams", "-show_format", str(dest)],
-        capture_output=True, text=True,
-    )
+    ["ffprobe", "-v", "quiet", "-print_format", "json",
+     "-show_streams", "-show_format", str(dest)],
+    capture_output=True, text=True, encoding="utf-8", errors="replace",
+)
     duration = width = height = None
     size_mb  = round(dest.stat().st_size / (1024 * 1024), 2)
 
@@ -198,10 +252,17 @@ def process_video(request):
     out_name = output_filename or f"output_{uuid.uuid4().hex[:8]}.mp4"
     if not out_name.endswith(".mp4"):
         out_name += ".mp4"
-    output_path = settings.OUTPUT_DIR / out_name
+
+# If pipeline contains subtitle op, save output next to the original input file
+# so it renders in-place (same directory as the source video)
+    has_subtitle = any(op.get("id") == "subtitle" for op in operations)
+    if has_subtitle:
+     output_path = settings.OUTPUT_DIR / out_name  # always save to outputs/
+    else:
+        output_path = settings.OUTPUT_DIR / out_name
 
     cmd    = build_ffmpeg_command(str(input_path), str(output_path), operations)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     if result.returncode != 0:
         return Response(
@@ -511,4 +572,159 @@ def health(request):
     return Response({
         "status": "ok",
         "ffmpeg": shutil.which("ffmpeg") is not None,
+    })
+    
+# ── Whisper Transcription ──────────────────────────────────────────────────────
+
+TRANSCRIBE_JOBS: dict = {}
+
+
+def _fmt_srt_time(seconds: float) -> str:
+    millis = int((seconds - int(seconds)) * 1000)
+    s = int(seconds)
+    h = s // 3600
+    m = (s % 3600) // 60
+    s = s % 60
+    return f"{h:02}:{m:02}:{s:02},{millis:03}"
+
+
+def _run_transcription(job_id: str, video_path: str, start: float, end: float):
+    tmp_audio = settings.UPLOAD_DIR / f"_audio_{job_id}.wav"
+    try:
+        TRANSCRIBE_JOBS[job_id]["status"] = "extracting_audio"
+        cmd = ["ffmpeg", "-y"]
+        if start > 0:
+            cmd += ["-ss", str(start)]
+        cmd += ["-i", video_path]
+        if end > start:
+            cmd += ["-t", str(end - start)]
+        cmd += ["-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(tmp_audio)]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode != 0 or not tmp_audio.exists():
+            TRANSCRIBE_JOBS[job_id] = {
+                "status": "error",
+                "message": f"Audio extraction failed: {result.stderr[-400:]}",
+            }
+            return
+
+        TRANSCRIBE_JOBS[job_id]["status"] = "transcribing"
+        import whisper
+        model = whisper.load_model("base")
+        transcription = model.transcribe(str(tmp_audio), word_timestamps=False)
+
+        raw_segments = list((transcription or {}).get("segments") or [])
+        segments, srt_lines = [], []
+
+        for i, seg in enumerate(raw_segments, start=1):
+            seg_dict = dict(seg)
+            abs_start = round(float(seg_dict["start"]) + start, 3)
+            abs_end   = round(float(seg_dict["end"])   + start, 3)
+            text      = (seg_dict.get("text") or "").strip()
+            if not text:
+                continue
+            segments.append({"id": i, "start": abs_start, "end": abs_end, "text": text})
+            srt_lines.append(
+                f"{i}\n{_fmt_srt_time(abs_start)} --> {_fmt_srt_time(abs_end)}\n{text}\n"
+            )
+
+        # Save .srt file so the burn-in view can reference it
+        srt_filename = f"sub_{job_id}.srt"
+        srt_path = settings.UPLOAD_DIR / srt_filename
+        srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+
+        TRANSCRIBE_JOBS[job_id] = {
+            "status":       "done",
+            "segments":     segments,
+            "srt":          "\n".join(srt_lines),
+            "srt_filename": srt_filename,      # ← frontend sends this back for burn-in
+            "language":     (transcription or {}).get("language") or "en",
+        }
+
+    except Exception as exc:
+        TRANSCRIBE_JOBS[job_id] = {"status": "error", "message": str(exc)}
+    finally:
+        if tmp_audio.exists():
+            tmp_audio.unlink(missing_ok=True)
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def transcribe_video(request):
+    """POST /api/editor/transcribe/ — start Whisper transcription job."""
+    filename = request.data.get("filename")
+    if not filename:
+        return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    filepath = resolve_video_path(filename)
+    if filepath is None:
+        return Response({"detail": "File not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    start = float(request.data.get("start", 0) or 0)
+    end   = float(request.data.get("end",   0) or 0)
+
+    job_id = str(uuid.uuid4())
+    TRANSCRIBE_JOBS[job_id] = {"status": "queued"}
+    threading.Thread(
+        target=_run_transcription,
+        args=(job_id, str(filepath), start, end),
+        daemon=True,
+    ).start()
+    return Response({"job_id": job_id}, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def transcribe_status(request, job_id):
+    """GET /api/editor/transcribe/<job_id>/"""
+    job = TRANSCRIBE_JOBS.get(job_id)
+    if job is None:
+        return Response({"detail": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+    return Response(job)
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def burn_subtitles(request):
+    """
+    POST /api/editor/burn-subtitles/
+    Body: input_filename, srt_filename
+    Wraps the subtitle op through the normal process pipeline.
+    """
+    if request.user.role != "editor":
+        return Response({"detail": "Only editors can burn subtitles."}, status=status.HTTP_403_FORBIDDEN)
+
+    input_filename = request.data.get("input_filename")
+    srt_filename   = request.data.get("srt_filename")
+
+    if not input_filename or not srt_filename:
+        return Response({"detail": "input_filename and srt_filename required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    input_path = resolve_video_path(input_filename)
+    srt_path   = settings.UPLOAD_DIR / srt_filename
+
+    if input_path is None:
+        return Response({"detail": "Input video not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not srt_path.exists():
+        return Response({"detail": "SRT file not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    out_name    = f"subtitled_{uuid.uuid4().hex[:8]}.mp4"
+    output_path = settings.OUTPUT_DIR / out_name
+
+    operations = [{"id": "subtitle", "vals": {"srt_path": str(srt_path)}}]
+    cmd    = build_ffmpeg_command(str(input_path), str(output_path), operations)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    if result.returncode != 0:
+        return Response(
+            {"detail": f"FFmpeg error: {result.stderr[-800:]}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response({
+        "output_filename": out_name,
+        "output_url":      f"/outputs/{out_name}",
+        "size_mb":         round(output_path.stat().st_size / (1024 * 1024), 2),
     })

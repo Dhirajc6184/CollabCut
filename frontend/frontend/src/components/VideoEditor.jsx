@@ -28,6 +28,7 @@ const OPS = [
   { id: "compress", icon: "⊿", label: "compress", desc: "reduce file size (h264)", color: "#50a020" },
   { id: "brightness", icon: "☀", label: "brightness", desc: "adjust brightness & contrast", color: "#c09030" },
   { id: "rotate", icon: "↻", label: "rotate", desc: "rotate 90 / 180 / 270°", color: "#a03080" },
+  { id: "subtitle", icon: "💬", label: "subtitles", desc: "auto-transcribe & burn subtitles", color: "#38bdf8" },
 ];
 
 const OP_DEFAULTS = {
@@ -44,7 +45,9 @@ const OP_DEFAULTS = {
   compress: { crf: "28" },
   brightness: { brightness: "0.1", contrast: "1.2" },
   rotate: { degrees: "90" },
-};
+  subtitle:   { start: "0", end: "0" },
+};// Ops that support time-range segment filtering
+const SEGMENT_OPS = new Set(["blur", "grayscale", "brightness", "speed", "volume"]);
 
 function formatTime(s) {
   if (!isFinite(s) || s < 0) return "00:00";
@@ -139,10 +142,126 @@ function ParamEditor({ op, vals, onChange }) {
           </select>
         </div>
       </div>;
-    default:
+      case "subtitle":
+      return <div style={st.paramRow}>
+        <div style={st.paramG}><label style={st.paramL}>start (sec)</label>{inp("start","0","number")}</div>
+        <div style={st.paramG}><label style={st.paramL}>end (sec, 0=full)</label>{inp("end","0","number")}</div>
+        <span style={st.hint}>0 end = full video</span>
+      </div>;
+     default:
       return <span style={st.hint}>no parameters needed</span>;
   }
 }
+
+function SubtitlePanel({ uploadedFile, api, token, opVals, setOpVals, onAdd, transcribeJob, setTranscribeJob }) {
+  const [polling, setPolling] = useState(false);
+  const [error, setError]     = useState(null);
+   const startTranscribe = async () => {
+    if (!uploadedFile) { setError("Upload a video first."); return; }
+    setError(null);
+    const start = parseFloat(opVals.start || 0) || 0;
+    const end   = parseFloat(opVals.end   || 0) || 0;
+    try {
+      const res = await fetch(api + "/transcribe/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify({ filename: uploadedFile.filename, start, end }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || "Failed"); }
+      const data = await res.json();
+      setTranscribeJob({ jobId: data.job_id, status: "queued", segments: [], srt: "" });
+      setPolling(true);
+      pollTranscribe(data.job_id);
+    } catch (e) { setError(e.message); }
+  };
+
+  const pollTranscribe = (jobId) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(api + `/transcribe/${jobId}/`, {
+          headers: { Authorization: "Bearer " + token },
+        });
+        const data = await res.json();
+        setTranscribeJob(prev => ({ ...prev, ...data }));
+        if (data.status === "done" || data.status === "error") {
+          clearInterval(interval);
+          setPolling(false);
+        }
+      } catch { clearInterval(interval); setPolling(false); }
+    }, 1500);
+  };
+
+  const downloadSrt = () => {
+    if (!transcribeJob?.srt) return;
+    const blob = new Blob([transcribeJob.srt], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (uploadedFile?.original_name || "subtitles").replace(/\.[^.]+$/, "") + ".srt";
+    a.click();
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+      <p style={{ fontSize:10, color:"#555558", margin:0, lineHeight:1.6 }}>
+        Uses Whisper AI to auto-transcribe speech and optionally burn subtitles into the video.
+      </p>
+
+      {/* Range inputs (reuse opVals.start/end as seconds) */}
+      <div style={{ display:"flex", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <label style={{ fontSize:9, color:"#555558", display:"block", marginBottom:3, textTransform:"uppercase" }}>start (sec)</label>
+          <input style={inpSt} type="number" value={opVals.start || "0"} placeholder="0" onChange={e => setOpVals(v => ({ ...v, start: e.target.value }))} />
+        </div>
+        <div style={{ flex:1 }}>
+          <label style={{ fontSize:9, color:"#555558", display:"block", marginBottom:3, textTransform:"uppercase" }}>end (sec, 0=full)</label>
+          <input style={inpSt} type="number" value={opVals.end || "0"} placeholder="0" onChange={e => setOpVals(v => ({ ...v, end: e.target.value }))} />
+        </div>
+      </div>
+
+      <button
+        style={{ padding:"7px 0", background: polling ? "#1a1a1d" : "#0f2a38", border:"1px solid #38bdf8", color:"#38bdf8", cursor: polling ? "default" : "pointer", fontSize:11, fontFamily:"inherit", borderRadius:6, letterSpacing:".04em" }}
+        onClick={startTranscribe} disabled={polling}
+      >
+        {polling ? `⏳ transcribing… (${transcribeJob?.status || ""})` : "💬 transcribe with Whisper"}
+      </button>
+
+      {error && <p style={{ fontSize:10, color:"#e05050", margin:0 }}>❌ {error}</p>}
+
+      {/* Results */}
+      {transcribeJob?.status === "done" && transcribeJob.segments?.length > 0 && (
+        <div>
+          <div style={{ maxHeight:140, overflowY:"auto", background:"#0a0a0a", border:"1px solid #1a1a1d", borderRadius:5, padding:"6px 8px", marginBottom:6 }}>
+            {transcribeJob.segments.map((seg, i) => (
+              <div key={i} style={{ marginBottom:5, fontSize:10, color:"#e8e8ea" }}>
+                <span style={{ color:"#38bdf8", marginRight:6 }}>{fmtSec(seg.start)} → {fmtSec(seg.end)}</span>
+                {seg.text}
+              </div>
+            ))}
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <button style={{ flex:1, padding:"6px 0", background:"#1a1a1d", border:"1px solid #2a2a2e", color:"#e8e8ea", cursor:"pointer", fontSize:10, fontFamily:"inherit", borderRadius:5 }} onClick={downloadSrt}>
+              ↓ download .srt
+            </button>
+            <button style={{ flex:1, padding:"6px 0", background:"#1a1a38", border:"1px solid #38bdf8", color:"#38bdf8", cursor:"pointer", fontSize:10, fontFamily:"inherit", borderRadius:5 }} onClick={onAdd}>
+              🔥 burn into video
+            </button>
+          </div>
+        </div>
+      )}
+
+      {transcribeJob?.status === "error" && (
+        <p style={{ fontSize:10, color:"#e05050", margin:0 }}>❌ {transcribeJob.message}</p>
+      )}
+    </div>
+  );
+}
+
+function fmtSec(s) {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+}
+
+const inpSt = { background:"#1a1a1d", border:"1px solid #2a2a2e", color:"#e8e8ea", padding:"4px 6px", fontSize:11, width:"100%", boxSizing:"border-box", fontFamily:"inherit", borderRadius:6, outline:"none" };
 
 // ── ThumbnailGenerator (unchanged from Project 2 — client-side canvas) ────────
 function ThumbnailGenerator({ videoRef, currentTime, uploadedFile, api, token }) {
@@ -482,6 +601,8 @@ export default function VideoEditor({ project, user, token, onBack }) {
   const [uploadStatus, setUploadStatus] = useState(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [scrubDragging, setScrubDragging] = useState(false);
+  const [segTimes, setSegTimes]   = useState({});   // { opKey: { start, end, enabled } }
+  const [transcribeJob, setTranscribeJob] = useState(null); // { jobId, status, segments, srt }
 
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -607,15 +728,51 @@ export default function VideoEditor({ project, user, token, onBack }) {
     xhr.send(fd);
   };
 
+
+  // ── Segment-time helpers ────────────────────────────────────────────────────
+  const isValidTime = val => /^\d{1,2}:\d{2}(:\d{2})?$/.test((val || "").trim());
+  const timeToSec = val => {
+    const parts = (val || "").trim().split(":").map(Number);
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return 0;
+  };
+  const getSegTime = () => segTimes[selectedOp] ?? { start: "", end: "", enabled: false };
+  const setSegField = (key, value) =>
+    setSegTimes(prev => ({ ...prev, [selectedOp]: { ...getSegTime(), [key]: value } }));
+  const toggleSeg = () =>
+    setSegTimes(prev => ({ ...prev, [selectedOp]: { ...getSegTime(), enabled: !getSegTime().enabled } }));
+
+
   // ── Pipeline ──────────────────────────────────────────────────────────────────
   const addOp = () => {
     if (!selectedOp) return;
-    const def = OPS.find(o => o.id === selectedOp);
+    const def  = OPS.find(o => o.id === selectedOp);
     const _key = Date.now() + Math.random();
     const vals = Object.assign({}, OP_DEFAULTS[selectedOp], opVals);
+
+    // ── Inject segment times if the toggle is on ───────────────────────────
+    if (SEGMENT_OPS.has(selectedOp)) {
+      const seg = getSegTime();
+      if (seg.enabled) {
+        if (!isValidTime(seg.start) || !isValidTime(seg.end)) {
+          alert("Please enter valid start and end times (e.g. 00:00:05 or 0:05).");
+          return;
+        }
+        const startSec = timeToSec(seg.start);
+        const endSec   = timeToSec(seg.end);
+        if (endSec <= startSec) {
+          alert("End time must be after start time.");
+          return;
+        }
+        vals._segment_start = startSec.toFixed(2);
+        vals._segment_end   = endSec.toFixed(2);
+      }
+    }
+
     setPipeline(prev => [...prev, { id: selectedOp, _key, vals, label: def.label, color: def.color }]);
     const clipStart = selectedOp === "trim" && vals.start ? timeStrToSec(vals.start) : 0;
-    const clipEnd = selectedOp === "trim" && vals.end ? timeStrToSec(vals.end) : (dur || 60);
+    const clipEnd   = selectedOp === "trim" && vals.end   ? timeStrToSec(vals.end)   : (dur || 60);
     setClips(prev => [...prev, { id: _key, op: selectedOp, start: clipStart, end: Math.min(clipEnd, dur || 60) }]);
     setOpVals({}); setActivePanel("pipeline");
   };
@@ -631,9 +788,20 @@ export default function VideoEditor({ project, user, token, onBack }) {
     setPipeline(prev => prev.map(step => {
       if (step._key !== id) return step;
       const vals = Object.assign({}, step.vals);
-      if (op === "trim") { vals.start = secToTimeStr(start); vals.end = secToTimeStr(end); }
-      else if (op === "text") { vals._enable_start = start.toFixed(2); vals._enable_end = end.toFixed(2); }
-      else if (["speed", "blur", "brightness", "grayscale", "volume"].includes(op)) { vals._segment_start = start.toFixed(2); vals._segment_end = end.toFixed(2); }
+      if (op === "trim") {
+        vals.start = secToTimeStr(start);
+        vals.end   = secToTimeStr(end);
+      } else if (op === "text") {
+        // text uses _enable_start/_enable_end (FFmpeg drawtext enable= syntax)
+        vals._enable_start = start.toFixed(2);
+        vals._enable_end   = end.toFixed(2);
+      } else {
+        // ALL other ops (rotate, blur, brightness, grayscale, resize, crop,
+        // speed, volume, compress) store the clip range as _segment_start/_segment_end.
+        // The backend _with_enable() helper and the frontend buildCmd() both read these.
+        vals._segment_start = start.toFixed(2);
+        vals._segment_end   = end.toFixed(2);
+      }
       return Object.assign({}, step, { vals });
     }));
   }, []);
@@ -664,27 +832,84 @@ export default function VideoEditor({ project, user, token, onBack }) {
   // ── Command preview ───────────────────────────────────────────────────────────
   const buildCmd = () => {
     if (!uploadedFile || pipeline.length === 0) return "";
+ 
+    // Helper: appends :enable='between(t,s,e)' when segment vals exist
+    const withEnable = (filterStr, vals) => {
+      const s = vals._segment_start ?? vals._enable_start;
+      const e = vals._segment_end   ?? vals._enable_end;
+      if (s != null && e != null) {
+        return `${filterStr}:enable='between(t,${parseFloat(s)},${parseFloat(e)})'`;
+      }
+      return filterStr;
+    };
+ 
     let cmd = "ffmpeg -y";
     const vf = [], af = [], extra = [];
+ 
     const trimOp = pipeline.find(s => s.id === "trim");
-    if (trimOp) { if (trimOp.vals.start) cmd += " -ss " + trimOp.vals.start; if (trimOp.vals.end) cmd += " -to " + trimOp.vals.end; }
+    if (trimOp) {
+      if (trimOp.vals.start) cmd += " -ss " + trimOp.vals.start;
+      if (trimOp.vals.end)   cmd += " -to " + trimOp.vals.end;
+    }
     cmd += " -i " + uploadedFile.filename;
+ 
     pipeline.forEach(({ id, vals }) => {
       if (id === "trim") return;
-      if (id === "resize") vf.push("scale=" + vals.width + ":" + vals.height);
-      else if (id === "crop") vf.push("crop=" + vals.w + ":" + vals.h + ":" + vals.x + ":" + vals.y);
-      else if (id === "text") vf.push("drawtext=text='" + vals.text + "':x=" + vals.x + ":y=" + vals.y + ":fontsize=" + vals.size + ":fontcolor=" + vals.color);
-      else if (id === "speed") { vf.push("setpts=" + round(1 / parseFloat(vals.factor || 2), 4) + "*PTS"); af.push("atempo=" + vals.factor); }
-      else if (id === "grayscale") vf.push("hue=s=0");
-      else if (id === "blur") vf.push("boxblur=" + vals.amount);
-      else if (id === "brightness") vf.push("eq=brightness=" + vals.brightness + ":contrast=" + vals.contrast);
-      else if (id === "rotate") vf.push("transpose=" + ({ "90": "1", "180": "2,transpose=2", "270": "2" }[vals.degrees] || "1"));
-      else if (id === "audio") extra.push("-an");
-      else if (id === "volume") af.push("volume=" + vals.level);
-      else if (id === "compress") extra.push("-vcodec libx264 -crf " + vals.crf + " -preset fast");
+ 
+      if (id === "resize") {
+        vf.push(withEnable(`scale=${vals.width}:${vals.height}`, vals));
+ 
+      } else if (id === "crop") {
+        vf.push(withEnable(`crop=${vals.w}:${vals.h}:${vals.x}:${vals.y}`, vals));
+ 
+      } else if (id === "text") {
+        // text uses _enable_start/_enable_end — withEnable handles both keys
+        vf.push(withEnable(
+          `drawtext=text='${vals.text}':x=${vals.x}:y=${vals.y}:fontsize=${vals.size}:fontcolor=${vals.color}`,
+          vals
+        ));
+ 
+      } else if (id === "speed") {
+        vf.push(withEnable(`setpts=${round(1 / parseFloat(vals.factor || 2), 4)}*PTS`, vals));
+        af.push(`atempo=${vals.factor}`);
+ 
+      } else if (id === "grayscale") {
+        vf.push(withEnable("hue=s=0", vals));
+ 
+      } else if (id === "blur") {
+        vf.push(withEnable(`boxblur=${vals.amount}`, vals));
+ 
+      } else if (id === "brightness") {
+        vf.push(withEnable(`eq=brightness=${vals.brightness}:contrast=${vals.contrast}`, vals));
+ 
+      } else if (id === "rotate") {
+        const deg = String(vals.degrees || "90");
+        const s   = vals._segment_start;
+        const e   = vals._segment_end;
+        const en  = (s != null && e != null)
+          ? `:enable='between(t,${parseFloat(s)},${parseFloat(e)})'`
+          : "";
+        if (deg === "180") {
+          vf.push(`transpose=2${en}`);
+          vf.push(`transpose=2${en}`);
+        } else {
+          const tMap = { "90": "1", "270": "2" };
+          vf.push(`transpose=${tMap[deg] || "1"}${en}`);
+        }
+ 
+      } else if (id === "audio") {
+        extra.push("-an");
+ 
+      } else if (id === "volume") {
+        af.push(`volume=${vals.level}`);
+ 
+      } else if (id === "compress") {
+        extra.push(`-vcodec libx264 -crf ${vals.crf} -preset fast`);
+      }
     });
-    if (vf.length) cmd += " -vf \"" + vf.join(",") + "\"";
-    if (af.length) cmd += " -af \"" + af.join(",") + "\"";
+ 
+    if (vf.length)    cmd += ` -vf "${vf.join(",")}"`;
+    if (af.length)    cmd += ` -af "${af.join(",")}"`;
     if (extra.length) cmd += " " + extra.join(" ");
     cmd += " output.mp4";
     return cmd;
@@ -813,10 +1038,67 @@ export default function VideoEditor({ project, user, token, onBack }) {
             <div style={st.paramPanel}>
               <div style={st.paramTitle}>{selectedOp.replace("_", " ")} options</div>
               {selectedOp === "thumbnail" ? (
-                <ThumbnailGenerator videoRef={videoRef} currentTime={currentTime} uploadedFile={uploadedFile} api={api} token={token} />
+                <ThumbnailGenerator
+                  videoRef={videoRef}
+                  currentTime={currentTime}
+                  uploadedFile={uploadedFile}
+                  api={api}
+                  token={token}
+                />
+              ) : selectedOp === "subtitle" ? (
+                <SubtitlePanel
+                  uploadedFile={uploadedFile}
+                  api={api}
+                  token={token}
+                  opVals={opVals}
+                  setOpVals={setOpVals}
+                  onAdd={addOp}
+                  transcribeJob={transcribeJob}
+                  setTranscribeJob={setTranscribeJob}
+                />
               ) : (
                 <>
                   <ParamEditor op={selectedOp} vals={opVals} onChange={setOpVals} />
+
+                  {/* ── Segment time-range toggle (for blur, grayscale, brightness, speed, volume) */}
+                  {SEGMENT_OPS.has(selectedOp) && (() => {
+                    const seg = getSegTime();
+                    const startInvalid   = seg.enabled && seg.start && !isValidTime(seg.start);
+                    const endInvalid     = seg.enabled && seg.end   && !isValidTime(seg.end);
+                    const endBeforeStart = seg.enabled && seg.start && seg.end &&
+                      isValidTime(seg.start) && isValidTime(seg.end) &&
+                      timeToSec(seg.end) <= timeToSec(seg.start);
+                    const opColor = OPS.find(o => o.id === selectedOp)?.color || "#888";
+                    return (
+                      <div style={{ marginTop: 10, padding: "10px 10px", background: "rgba(255,255,255,0.03)", borderRadius: 6, border: seg.enabled ? `1px solid ${opColor}55` : "1px solid #2a2a2e", transition: "border-color 0.2s" }}>
+                        {/* Toggle row */}
+                        <div style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", userSelect:"none", marginBottom: seg.enabled ? 10 : 0 }} onClick={toggleSeg}>
+                          <div style={{ width:32, height:16, borderRadius:8, background: seg.enabled ? opColor : "#2a2a2e", position:"relative", transition:"background 0.2s", flexShrink:0 }}>
+                            <div style={{ width:12, height:12, borderRadius:"50%", background:"#fff", position:"absolute", top:2, left: seg.enabled ? 18 : 2, transition:"left 0.2s" }} />
+                          </div>
+                          <span style={{ fontSize:10, color: seg.enabled ? opColor : "#555558", transition:"color 0.2s" }}>apply to time range only</span>
+                        </div>
+                        {/* Time inputs */}
+                        {seg.enabled && (
+                          <>
+                            <div style={{ display:"flex", gap:8 }}>
+                              <div style={{ flex:1 }}>
+                                <label style={{ ...st.paramL, display:"block", marginBottom:3 }}>start time</label>
+                                <input style={{ ...st.inp, width:"100%", boxSizing:"border-box", borderColor: startInvalid ? "#e05050" : undefined }} type="text" value={seg.start} placeholder="00:00:00" onChange={e => setSegField("start", e.target.value)} />
+                              </div>
+                              <div style={{ flex:1 }}>
+                                <label style={{ ...st.paramL, display:"block", marginBottom:3 }}>end time</label>
+                                <input style={{ ...st.inp, width:"100%", boxSizing:"border-box", borderColor: (endInvalid || endBeforeStart) ? "#e05050" : undefined }} type="text" value={seg.end} placeholder="00:00:10" onChange={e => setSegField("end", e.target.value)} />
+                              </div>
+                            </div>
+                            {endBeforeStart && <p style={{ fontSize:10, color:"#e05050", margin:"6px 0 0" }}>⚠ end time must be after start time</p>}
+                            <p style={{ fontSize:10, color:"#555558", margin:"5px 0 0" }}>format: HH:MM:SS or MM:SS</p>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <button style={st.addBtn} onClick={addOp}>+ add to pipeline</button>
                 </>
               )}

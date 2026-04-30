@@ -80,9 +80,11 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # FFmpeg editor file storage
-UPLOAD_DIR = BASE_DIR / 'uploads'
-OUTPUT_DIR = BASE_DIR / 'outputs'
-UPLOAD_DIR.mkdir(exist_ok=True)
+
+OUTPUT_DIR = BASE_DIR / "outputs"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # JWT settings (used by editor app)
