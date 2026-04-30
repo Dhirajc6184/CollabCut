@@ -805,6 +805,7 @@ export default function VideoEditor({ project, user, token, onBack }) {
               token={token}
               uploadedFilename={uploadedFile?.filename || null}
               apiBase={api}
+              videoSrc={videoSrc}
             />
           )}
 
