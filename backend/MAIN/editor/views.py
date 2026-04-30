@@ -22,19 +22,12 @@ from .models import VideoComment
 
 
 def resolve_video_path(filename):
-    """
-    Resolve video path from:
-    1. editor uploads/
-    2. main project media/videos/
-    """
     upload_path = settings.UPLOAD_DIR / filename
     if upload_path.exists():
         return upload_path
-
     media_video_path = Path(settings.MEDIA_ROOT) / "videos" / filename
     if media_video_path.exists():
         return media_video_path
-
     return None
 
 
@@ -59,19 +52,26 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
         op_id = op["id"]
         vals  = op.get("vals", {})
 
-        # ── Segment enable expressions ───────────────────────────────────────
-        seg_start = vals.get("_segment_start")
-        seg_end   = vals.get("_segment_end")
+        seg_start  = vals.get("_segment_start")
+        seg_end    = vals.get("_segment_end")
         seg_enable = (
             f":enable='between(t,{seg_start},{seg_end})'"
             if seg_start is not None and seg_end is not None else ""
         )
 
-        en_start = vals.get("_enable_start")
-        en_end   = vals.get("_enable_end")
+        en_start    = vals.get("_enable_start")
+        en_end      = vals.get("_enable_end")
         text_enable = (
             f":enable='between(t,{en_start},{en_end})'"
             if en_start is not None and en_end is not None else ""
+        )
+
+        # time-range from ParamEditor t_start/t_end fields
+        t_start = vals.get("t_start", "")
+        t_end   = vals.get("t_end", "")
+        t_enable = (
+            f":enable='between(t,{t_start},{t_end})'"
+            if t_start and t_end else ""
         )
 
         if op_id == "trim":
@@ -88,29 +88,34 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
 
         elif op_id == "text":
             text = str(vals.get("text", "Hello")).replace("'", "\\'")
+            enable = text_enable or t_enable
             vfilters.append(
                 f"drawtext=text='{text}':x={vals.get('x', 50)}:y={vals.get('y', 50)}"
                 f":fontsize={vals.get('size', 40)}:fontcolor={vals.get('color', 'white')}"
-                f":box=1:boxcolor=black@0.4:boxborderw=5{text_enable}"
+                f":box=1:boxcolor=black@0.4:boxborderw=5{enable}"
             )
 
         elif op_id == "speed":
             f = float(vals.get("factor", 2.0))
-            vfilters.append(f"setpts={round(1.0 / f, 4)}*PTS{seg_enable}")
+            enable = seg_enable or t_enable
+            vfilters.append(f"setpts={round(1.0 / f, 4)}*PTS{enable}")
             if f != 1.0:
                 afilters.append(f"atempo={min(max(f, 0.5), 2.0)}")
 
         elif op_id == "grayscale":
-            vfilters.append(f"hue=s=0{seg_enable}")
+            enable = seg_enable or t_enable
+            vfilters.append(f"hue=s=0{enable}")
 
         elif op_id == "blur":
-            vfilters.append(f"boxblur={vals.get('amount', 10)}{seg_enable}")
+            enable = seg_enable or t_enable
+            vfilters.append(f"boxblur={vals.get('amount', 10)}{enable}")
 
         elif op_id == "brightness":
+            enable = seg_enable or t_enable
             vfilters.append(
                 f"eq=brightness={vals.get('brightness', 0.1)}"
                 f":contrast={vals.get('contrast', 1.0)}"
-                f"{seg_enable}"
+                f"{enable}"
             )
 
         elif op_id == "rotate":
@@ -121,9 +126,10 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
             has_audio = False
 
         elif op_id == "volume":
-            level = vals.get("level", 2.0)
-            if seg_start is not None and seg_end is not None:
-                afilters.append(f"volume={level}:enable='between(t,{seg_start},{seg_end})'")
+            level  = vals.get("level", 2.0)
+            enable = seg_enable or t_enable
+            if enable:
+                afilters.append(f"volume={level}{enable}")
             else:
                 afilters.append(f"volume={level}")
 
@@ -133,25 +139,18 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
         elif op_id == "subtitle":
             srt_path = vals.get("srt_path", "")
             if srt_path and Path(srt_path).exists():
-        # Windows: FFmpeg subtitles filter needs forward slashes
-        # and the drive colon escaped as \: inside the filtergraph string
                 safe_path = str(Path(srt_path).resolve())
                 safe_path = safe_path.replace("\\", "/")
-        # Escape the colon after drive letter: C:/path -> C\:/path
+                # Windows: escape drive letter colon C:/path → C\:/path
                 if len(safe_path) > 1 and safe_path[1] == ":":
                     safe_path = safe_path[0] + "\\:" + safe_path[2:]
                 vfilters.append(
-            f"subtitles='{safe_path}':force_style='"
-            f"Alignment=2,"
-            f"FontName=Arial,"
-            f"FontSize=18,"
-            f"PrimaryColour=&H00FFFFFF,"
-            f"OutlineColour=&H00000000,"
-            f"BackColour=&H80000000,"
-            f"Outline=2,"
-            f"Shadow=1,"
-            f"MarginV=30'"
-        )
+                    f"subtitles='{safe_path}':force_style='"
+                    f"Alignment=2,FontName=Arial,FontSize=18,"
+                    f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+                    f"BackColour=&H80000000,Outline=2,Shadow=1,MarginV=30'"
+                )
+
     if vfilters:
         cmd += ["-vf", ",".join(vfilters)]
     if afilters and has_audio:
@@ -169,10 +168,6 @@ def build_ffmpeg_command(input_path: str, output_path: str, operations: list):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def upload_video(request):
-    """
-    Upload a video file into the editor's UPLOAD_DIR.
-    Only editors may upload.
-    """
     if request.user.role != "editor":
         return Response(
             {"detail": "Only editors can upload to the editor."},
@@ -195,10 +190,10 @@ def upload_video(request):
             f.write(chunk)
 
     probe = subprocess.run(
-    ["ffprobe", "-v", "quiet", "-print_format", "json",
-     "-show_streams", "-show_format", str(dest)],
-    capture_output=True, text=True, encoding="utf-8", errors="replace",
-)
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_streams", "-show_format", str(dest)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
     duration = width = height = None
     size_mb  = round(dest.stat().st_size / (1024 * 1024), 2)
 
@@ -226,7 +221,6 @@ def upload_video(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def process_video(request):
-    """Run the FFmpeg pipeline on a previously-uploaded OR project video."""
     if request.user.role != "editor":
         return Response(
             {"detail": "Only editors can process videos."},
@@ -240,9 +234,7 @@ def process_video(request):
     if not input_filename:
         return Response({"detail": "input_filename is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX: use resolve_video_path so project videos in media/videos/ also work
     input_path = resolve_video_path(input_filename)
-
     if input_path is None:
         return Response(
             {"detail": f"Input file not found: {input_filename}"},
@@ -252,14 +244,7 @@ def process_video(request):
     out_name = output_filename or f"output_{uuid.uuid4().hex[:8]}.mp4"
     if not out_name.endswith(".mp4"):
         out_name += ".mp4"
-
-# If pipeline contains subtitle op, save output next to the original input file
-# so it renders in-place (same directory as the source video)
-    has_subtitle = any(op.get("id") == "subtitle" for op in operations)
-    if has_subtitle:
-     output_path = settings.OUTPUT_DIR / out_name  # always save to outputs/
-    else:
-        output_path = settings.OUTPUT_DIR / out_name
+    output_path = settings.OUTPUT_DIR / out_name
 
     cmd    = build_ffmpeg_command(str(input_path), str(output_path), operations)
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -283,7 +268,6 @@ def process_video(request):
 @authentication_classes([])
 @permission_classes([AllowAny])
 def serve_file(request, filename):
-    """Serve files from UPLOAD_DIR or OUTPUT_DIR (dev-mode only)."""
     for base_dir in [settings.UPLOAD_DIR, settings.OUTPUT_DIR]:
         path = base_dir / filename
         if path.exists():
@@ -316,15 +300,10 @@ def _comment_to_dict(c):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def comments(request, project_id):
-    """
-    GET  → return all comments for the project (editors and viewers can read)
-    POST → post a new comment (viewers only)
-    """
     if request.method == "GET":
         qs = VideoComment.objects.filter(project_id=project_id)
         return Response([_comment_to_dict(c) for c in qs])
 
-    # POST
     if request.user.role != "viewer":
         return Response(
             {"detail": "Only viewers can post comments."},
@@ -357,9 +336,6 @@ def comments(request, project_id):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def comment_detail(request, project_id, comment_id):
-    """
-    DELETE → editors can remove any comment; viewers can only remove their own.
-    """
     try:
         comment = VideoComment.objects.get(id=comment_id, project_id=project_id)
     except VideoComment.DoesNotExist:
@@ -389,7 +365,6 @@ def _fmt_time(seconds):
 
 
 def _analyse_video(job_id, filepath):
-    """Background thread: runs OpenCV frame analysis and stores result in SCENE_JOBS."""
     try:
         SCENE_JOBS[job_id]["status"] = "opening"
         cap = cv2.VideoCapture(filepath)
@@ -533,9 +508,7 @@ def scene_extract(request):
     if not filename:
         return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX: also check media/videos/ for project videos
     filepath = resolve_video_path(filename)
-
     if filepath is None:
         return Response(
             {"detail": "File not found. Upload the video first."},
@@ -573,7 +546,8 @@ def health(request):
         "status": "ok",
         "ffmpeg": shutil.which("ffmpeg") is not None,
     })
-    
+
+
 # ── Whisper Transcription ──────────────────────────────────────────────────────
 
 TRANSCRIBE_JOBS: dict = {}
@@ -616,7 +590,7 @@ def _run_transcription(job_id: str, video_path: str, start: float, end: float):
         segments, srt_lines = [], []
 
         for i, seg in enumerate(raw_segments, start=1):
-            seg_dict = dict(seg)
+            seg_dict  = dict(seg)
             abs_start = round(float(seg_dict["start"]) + start, 3)
             abs_end   = round(float(seg_dict["end"])   + start, 3)
             text      = (seg_dict.get("text") or "").strip()
@@ -627,17 +601,18 @@ def _run_transcription(job_id: str, video_path: str, start: float, end: float):
                 f"{i}\n{_fmt_srt_time(abs_start)} --> {_fmt_srt_time(abs_end)}\n{text}\n"
             )
 
-        # Save .srt file so the burn-in view can reference it
-        srt_filename = f"sub_{job_id}.srt"
-        srt_path = settings.UPLOAD_DIR / srt_filename
-        srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+        # Save single SRT file to disk
+        srt_filename  = f"sub_{job_id}.srt"
+        srt_file_path = settings.UPLOAD_DIR / srt_filename
+        srt_content   = "\n".join(srt_lines)
+        srt_file_path.write_text(srt_content, encoding="utf-8")
 
         TRANSCRIBE_JOBS[job_id] = {
-            "status":       "done",
-            "segments":     segments,
-            "srt":          "\n".join(srt_lines),
-            "srt_filename": srt_filename,      # ← frontend sends this back for burn-in
-            "language":     (transcription or {}).get("language") or "en",
+            "status":   "done",
+            "segments": segments,
+            "srt":      srt_content,
+            "srt_path": str(srt_file_path),   # ← full disk path for FFmpeg
+            "language": (transcription or {}).get("language") or "en",
         }
 
     except Exception as exc:
@@ -651,7 +626,6 @@ def _run_transcription(job_id: str, video_path: str, start: float, end: float):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def transcribe_video(request):
-    """POST /api/editor/transcribe/ — start Whisper transcription job."""
     filename = request.data.get("filename")
     if not filename:
         return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -677,7 +651,6 @@ def transcribe_video(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def transcribe_status(request, job_id):
-    """GET /api/editor/transcribe/<job_id>/"""
     job = TRANSCRIBE_JOBS.get(job_id)
     if job is None:
         return Response({"detail": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -688,11 +661,6 @@ def transcribe_status(request, job_id):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def burn_subtitles(request):
-    """
-    POST /api/editor/burn-subtitles/
-    Body: input_filename, srt_filename
-    Wraps the subtitle op through the normal process pipeline.
-    """
     if request.user.role != "editor":
         return Response({"detail": "Only editors can burn subtitles."}, status=status.HTTP_403_FORBIDDEN)
 

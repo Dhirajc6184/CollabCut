@@ -183,7 +183,12 @@ function SubtitlePanel({ uploadedFile, api, token, opVals, setOpVals, onAdd, tra
         });
         const data = await res.json();
         setTranscribeJob(prev => ({ ...prev, ...data }));
-        if (data.status === "done" || data.status === "error") {
+        if (data.status === "done") {
+          setOpVals(prev => ({ ...prev, srt_path: data.srt_path }));
+          clearInterval(interval);
+          setPolling(false);
+        }
+        if (data.status === "error") {
           clearInterval(interval);
           setPolling(false);
         }
@@ -227,7 +232,7 @@ function SubtitlePanel({ uploadedFile, api, token, opVals, setOpVals, onAdd, tra
 
       {error && <p style={{ fontSize:10, color:"#e05050", margin:0 }}>❌ {error}</p>}
 
-      {/* Results */}
+  {/* Results */}
       {transcribeJob?.status === "done" && transcribeJob.segments?.length > 0 && (
         <div>
           <div style={{ maxHeight:140, overflowY:"auto", background:"#0a0a0a", border:"1px solid #1a1a1d", borderRadius:5, padding:"6px 8px", marginBottom:6 }}>
@@ -239,13 +244,35 @@ function SubtitlePanel({ uploadedFile, api, token, opVals, setOpVals, onAdd, tra
             ))}
           </div>
           <div style={{ display:"flex", gap:6 }}>
-            <button style={{ flex:1, padding:"6px 0", background:"#1a1a1d", border:"1px solid #2a2a2e", color:"#e8e8ea", cursor:"pointer", fontSize:10, fontFamily:"inherit", borderRadius:5 }} onClick={downloadSrt}>
+            <button
+              style={{ flex:1, padding:"6px 0", background:"#1a1a1d", border:"1px solid #2a2a2e", color:"#e8e8ea", cursor:"pointer", fontSize:10, fontFamily:"inherit", borderRadius:5 }}
+              onClick={downloadSrt}
+            >
               ↓ download .srt
             </button>
-            <button style={{ flex:1, padding:"6px 0", background:"#1a1a38", border:"1px solid #38bdf8", color:"#38bdf8", cursor:"pointer", fontSize:10, fontFamily:"inherit", borderRadius:5 }} onClick={onAdd}>
+            <button
+              style={{
+                flex:1, padding:"6px 0", background: transcribeJob.srt_path ? "#1a1a38" : "#111",
+                border: "1px solid " + (transcribeJob.srt_path ? "#38bdf8" : "#2a2a2e"),
+                color: transcribeJob.srt_path ? "#38bdf8" : "#555558",
+                cursor: transcribeJob.srt_path ? "pointer" : "not-allowed",
+                fontSize:10, fontFamily:"inherit", borderRadius:5
+              }}
+              onClick={() => {
+                if (!transcribeJob.srt_path) return;
+                onAdd();
+              }}
+              disabled={!transcribeJob.srt_path}
+              title={!transcribeJob.srt_path ? "srt_path not received from server" : "burn subtitles into video"}
+            >
               🔥 burn into video
             </button>
           </div>
+          {!transcribeJob.srt_path && (
+            <p style={{ fontSize:9, color:"#e05050", margin:"4px 0 0" }}>
+              ⚠ srt_path missing — check backend Fix 1
+            </p>
+          )}
         </div>
       )}
 
@@ -437,7 +464,7 @@ function ThumbnailGenerator({ videoRef, currentTime, uploadedFile, api, token })
           <div style={{ color: "#555558", fontSize: 9, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>top 4 frames — click to select</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
             {candidates.map((c, i) => (
-              <div key={i} onClick={() => setSelected(i)} style={{ position: "relative", cursor: "pointer", borderRadius: 4, overflow: "hidden", border: "1px solid " + (selected === i ? "#e8a020" : "#2a2a2e"), boxSizing: "border-box" }}>
+              <div key={i} onClick={() => { setSelected(i); setModalImg(c); }} style={{ position: "relative", cursor: "pointer", borderRadius: 4, overflow: "hidden", border: "1px solid " + (selected === i ? "#e8a020" : "#2a2a2e"), boxSizing: "border-box" }}>
                 <img src={c.dataUrl} alt={"candidate " + i} style={{ width: "100%", display: "block" }} />
                 <div style={{ position: "absolute", top: 3, right: 3, background: "rgba(0,0,0,0.75)", borderRadius: 3, fontSize: 9, color: "#e8a020", padding: "1px 4px", fontWeight: 600 }}>{c.score}</div>
                 <div style={{ position: "absolute", bottom: 3, left: 3, background: "rgba(0,0,0,0.65)", borderRadius: 3, fontSize: 8, color: "rgba(255,255,255,0.7)", padding: "1px 4px" }}>{formatTimeFull(c.time)}</div>
@@ -445,7 +472,9 @@ function ThumbnailGenerator({ videoRef, currentTime, uploadedFile, api, token })
                 <div style={{ position: "absolute", top: 3, left: 3, background: i === 0 ? "#e8a020" : "rgba(0,0,0,0.65)", color: i === 0 ? "#000" : "rgba(255,255,255,0.6)", borderRadius: 3, fontSize: 8, padding: "1px 4px", fontWeight: 600 }}>#{i + 1}</div>
               </div>
             ))}
+            
           </div>
+          
           <button onClick={applyStyleToCandidates} style={{ marginTop: 5, width: "100%", padding: "5px 0", background: "#1a1a1d", border: "1px solid #2a2a2e", color: "#8a8a90", cursor: "pointer", fontSize: 10, fontFamily: "inherit", borderRadius: 4 }}>
             ↺ apply "{style}" style to all
           </button>
@@ -470,7 +499,6 @@ function ThumbnailGenerator({ videoRef, currentTime, uploadedFile, api, token })
     </div>
   );
 }
-
 // ── Timeline (unchanged from Project 2) ────────────────────────────────────────
 function Timeline({ duration, currentTime, clips, onSeek, onClipChange, onParamWriteback }) {
   const railRef = useRef(null);
